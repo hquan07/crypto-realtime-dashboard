@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realtime Crypto Dashboard</title>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lightweight Charts (TradingView) cho Candlestick -->
+    <script src="lightweight-charts.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <!-- Toast Container for Alerts -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <div class="dashboard-container">
+        <header>
+            <div class="header-title">
+                <h1>Crypto Pipeline Dashboard</h1>
+                <p>Streaming real-time data from Binance → Kafka → Flink → Redis</p>
+            </div>
+            <div class="status-indicator">
+                <span class="dot"></span>
+                <span id="connection-status">Live</span>
+            </div>
+        </header>
+
+        <!-- Search / Filter Bar -->
+        <section class="search-section glass-card" style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center; padding: 15px 20px;">
+            <label for="coinSearch" style="font-weight: 600; color: #a0aec0;">Search Coin:</label>
+            <input type="text" id="coinSearch" list="coins-list" placeholder="e.g. BTCUSDT" class="filter-select" style="flex: 1; max-width: 300px;">
+            <datalist id="coins-list">
+                <!-- Dynamically populated in app.js -->
+            </datalist>
+            <span id="active-coins-count" style="color: #48bb78; font-size: 0.9em; font-weight: bold;">0 active coins</span>
+        </section>
+
+        <!-- Dynamic Price Grid -->
+        <section class="price-grid" id="dynamic-price-grid">
+            <!-- Cards will be injected here by app.js -->
+        </section>
+
+        <!-- Tabs Navigation -->
+        <nav class="tabs-nav glass-card">
+            <button class="tab-btn active" data-tab="tab-overview">Overview</button>
+            <button class="tab-btn" data-tab="tab-dominance">Market Dominance</button>
+            <button class="tab-btn" data-tab="tab-activity">Trading Activity</button>
+            <button class="tab-btn" data-tab="tab-pro">Professional</button>
+        </nav>
+
+        <!-- Tab 1: Overview -->
+        <div id="tab-overview" class="tab-content active">
+            <div class="charts-grid">
+                <section class="chart-section glass-card">
+                    <div class="chart-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <h2>Real-time Price Trend</h2>
+                            <p class="subtitle">Live updates from Redis every 5 seconds</p>
+                        </div>
+                        <select id="priceTrendFilter" class="filter-select">
+                            <option value="ALL_PCT">Compare Top 8 (% Change)</option>
+                            <!-- Other options populated dynamically -->
+                        </select>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </section>
+                
+                <section class="chart-section glass-card">
+                    <div class="chart-header">
+                        <h2>Trading Volume</h2>
+                        <p class="subtitle">Aggregated via Apache Flink</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="volumeChart"></canvas>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Tab 2: Market Dominance -->
+        <div id="tab-dominance" class="tab-content">
+            <div class="charts-grid">
+                <section class="chart-section glass-card">
+                    <div class="chart-header">
+                        <h2>Volume Dominance</h2>
+                        <p class="subtitle">Total Trading Volume Breakdown</p>
+                    </div>
+                    <div class="chart-container" style="display: flex; justify-content: center;">
+                        <canvas id="doughnutChart"></canvas>
+                    </div>
+                </section>
+                
+                <section class="chart-section glass-card">
+                    <div class="chart-header">
+                        <h2>Trades Dominance</h2>
+                        <p class="subtitle">Total Number of Executed Trades Breakdown</p>
+                    </div>
+                    <div class="chart-container" style="display: flex; justify-content: center;">
+                        <canvas id="polarChart"></canvas>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Tab 3: Trading Activity -->
+        <div id="tab-activity" class="tab-content">
+            <div class="charts-grid">
+                <section class="chart-section glass-card">
+                    <div class="chart-header">
+                        <h2>Volatility vs Volume (Bubble Chart)</h2>
+                        <p class="subtitle">X=Volume, Y=Price, Size=Trade Count</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="bubbleChart"></canvas>
+                    </div>
+                </section>
+                
+                <section class="chart-section glass-card">
+                    <div class="chart-header">
+                        <h2>Top 4 Coins Overview (Radar Chart)</h2>
+                        <p class="subtitle">Volume & Trades Scale Comparison</p>
+                    </div>
+                    <div class="chart-container" style="display: flex; justify-content: center;">
+                        <canvas id="radarChart"></canvas>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Tab 4: Professional -->
+        <div id="tab-pro" class="tab-content">
+            <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 20px;">
+                <section class="chart-section glass-card">
+                    <div class="chart-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <img id="candlestick-coin-icon" src="https://assets.coincap.io/assets/icons/btc@2x.png" alt="coin icon" style="width: 32px; height: 32px; border-radius: 50%;">
+                            <div>
+                                <h2 style="margin: 0;">Live 1-Minute Candlesticks (<span id="candlestick-coin-title">BTCUSDT</span>)</h2>
+                                <p class="subtitle" style="margin: 0;">Real-time OHLC & RSI Indicator</p>
+                            </div>
+                        </div>
+                        <div id="ai-badge" class="toast" style="position: static; animation: none; display: none; padding: 10px; margin: 0; min-width: 150px; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981;">
+                            <div class="toast-title" style="color: #10b981;">🤖 AI Forecast</div>
+                            <div class="toast-message" id="ai-forecast-msg" style="color: #fff; font-weight: bold;">Waiting for data...</div>
+                        </div>
+                    </div>
+                    <!-- TradingView Lightweight Charts Container -->
+                    <div class="chart-container" id="candlestick-container" style="height: 500px;"></div>
+                </section>
+                
+                <section class="chart-section glass-card" style="max-height: 600px; overflow-y: auto;">
+                    <div class="chart-header">
+                        <h2>Orderbook (Live)</h2>
+                    </div>
+                    <div id="orderbook-container" style="font-family: monospace; font-size: 0.9em;">
+                        <div style="display: flex; justify-content: space-between; color: #a0aec0; margin-bottom: 5px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;">
+                            <span>Price</span>
+                            <span>Amount</span>
+                        </div>
+                        <div id="ob-asks" style="color: #ef4444; display: flex; flex-direction: column-reverse; gap: 4px; margin-bottom: 10px;"></div>
+                        <div style="text-align: center; color: #a0aec0; font-weight: bold; margin: 5px 0;">--- SPREAD ---</div>
+                        <div id="ob-bids" style="color: #10b981; display: flex; flex-direction: column; gap: 4px;"></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="app.js?v=3"></script>
+</body>
+</html>
