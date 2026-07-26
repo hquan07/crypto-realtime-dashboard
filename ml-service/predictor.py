@@ -28,7 +28,6 @@ import numpy as np
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("momentum-signal")
-
 KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:29092')
 REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
 
