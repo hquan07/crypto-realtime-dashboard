@@ -4,8 +4,15 @@ Crypto Redis Sink Service
 =========================
 Continuously polls Elasticsearch for the latest aggregated crypto data
 and updates Redis for real-time dashboards.
+
+This is what populates the `crypto:avg_price`, `crypto:volume`, and
+`crypto:trades` hashes that the FastAPI backend reads for `/api/data`.
+Flink writes 5-second aggregations into `crypto-by-minute` in ES; this
+service takes the latest window per symbol and copies it into Redis so
+the dashboard has O(1) reads.
 """
 
+import os
 import time
 import logging
 from elasticsearch import Elasticsearch
@@ -15,9 +22,9 @@ import redis
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("crypto-redis-sink")
 
-ES_HOST = "http://localhost:9200"
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
+ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
 def main():
     logger.info("Starting Crypto Redis Sink Service...")

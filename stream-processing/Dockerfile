@@ -7,9 +7,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY alert_consumer.py .
 COPY indicator_consumer.py .
+COPY redis_sink_crypto.py .
 
-# Create a runner script
-RUN echo '#!/bin/bash\npython -u alert_consumer.py &\npython -u indicator_consumer.py' > run_consumers.sh
+# Runner: three background consumers, forwarding SIGTERM to all of them
+RUN cat > run_consumers.sh <<'EOF'
+#!/bin/bash
+set -e
+python -u alert_consumer.py &
+python -u indicator_consumer.py &
+python -u redis_sink_crypto.py &
+wait -n
+exit $?
+EOF
 RUN chmod +x run_consumers.sh
 
 CMD ["./run_consumers.sh"]

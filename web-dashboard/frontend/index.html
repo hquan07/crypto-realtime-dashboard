@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,10 +9,11 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Lightweight Charts (TradingView) cho Candlestick -->
     <script src="lightweight-charts.js"></script>
-    
+
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <div class="background-blobs">
         <div class="blob blob-1"></div>
@@ -35,13 +37,16 @@
         </header>
 
         <!-- Search / Filter Bar -->
-        <section class="search-section glass-card" style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center; padding: 15px 20px;">
+        <section class="search-section glass-card"
+            style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center; padding: 15px 20px;">
             <label for="coinSearch" style="font-weight: 600; color: #a0aec0;">Search Coin:</label>
-            <input type="text" id="coinSearch" list="coins-list" placeholder="e.g. BTCUSDT" class="filter-select" style="flex: 1; max-width: 300px;">
+            <input type="text" id="coinSearch" list="coins-list" placeholder="e.g. BTCUSDT" class="filter-select"
+                style="flex: 1; max-width: 300px;">
             <datalist id="coins-list">
                 <!-- Dynamically populated in app.js -->
             </datalist>
-            <span id="active-coins-count" style="color: #48bb78; font-size: 0.9em; font-weight: bold;">0 active coins</span>
+            <span id="active-coins-count" style="color: #48bb78; font-size: 0.9em; font-weight: bold;">0 active
+                coins</span>
         </section>
 
         <!-- Dynamic Price Grid -->
@@ -61,7 +66,8 @@
         <div id="tab-overview" class="tab-content active">
             <div class="charts-grid">
                 <section class="chart-section glass-card">
-                    <div class="chart-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div class="chart-header"
+                        style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div>
                             <h2>Real-time Price Trend</h2>
                             <p class="subtitle">Live updates from Redis every 5 seconds</p>
@@ -75,7 +81,7 @@
                         <canvas id="priceChart"></canvas>
                     </div>
                 </section>
-                
+
                 <section class="chart-section glass-card">
                     <div class="chart-header">
                         <h2>Trading Volume</h2>
@@ -100,7 +106,7 @@
                         <canvas id="doughnutChart"></canvas>
                     </div>
                 </section>
-                
+
                 <section class="chart-section glass-card">
                     <div class="chart-header">
                         <h2>Trades Dominance</h2>
@@ -125,7 +131,7 @@
                         <canvas id="bubbleChart"></canvas>
                     </div>
                 </section>
-                
+
                 <section class="chart-section glass-card">
                     <div class="chart-header">
                         <h2>Top 4 Coins Overview (Radar Chart)</h2>
@@ -142,35 +148,45 @@
         <div id="tab-pro" class="tab-content">
             <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 20px;">
                 <section class="chart-section glass-card">
-                    <div class="chart-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div class="chart-header"
+                        style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <img id="candlestick-coin-icon" src="https://assets.coincap.io/assets/icons/btc@2x.png" alt="coin icon" style="width: 32px; height: 32px; border-radius: 50%;">
+                            <img id="candlestick-coin-icon" src="https://assets.coincap.io/assets/icons/btc@2x.png"
+                                alt="coin icon" style="width: 32px; height: 32px; border-radius: 50%;">
                             <div>
-                                <h2 style="margin: 0;">Live 1-Minute Candlesticks (<span id="candlestick-coin-title">BTCUSDT</span>)</h2>
+                                <h2 style="margin: 0;">Live 1-Minute Candlesticks (<span
+                                        id="candlestick-coin-title">BTCUSDT</span>)</h2>
                                 <p class="subtitle" style="margin: 0;">Real-time OHLC & RSI Indicator</p>
                             </div>
                         </div>
-                        <div id="ai-badge" class="toast" style="position: static; animation: none; display: none; padding: 10px; margin: 0; min-width: 150px; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981;">
-                            <div class="toast-title" style="color: #10b981;">🤖 AI Forecast</div>
-                            <div class="toast-message" id="ai-forecast-msg" style="color: #fff; font-weight: bold;">Waiting for data...</div>
+                        <div id="ai-badge" class="toast"
+                            style="position: static; animation: none; display: none; padding: 10px; margin: 0; min-width: 150px; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981;">
+                            <div class="toast-title" style="color: #10b981;">📈 Momentum Signal</div>
+                            <div class="toast-message" id="ai-forecast-msg" style="color: #fff; font-weight: bold;">
+                                Waiting for data...</div>
                         </div>
                     </div>
                     <!-- TradingView Lightweight Charts Container -->
                     <div class="chart-container" id="candlestick-container" style="height: 500px;"></div>
                 </section>
-                
+
                 <section class="chart-section glass-card" style="max-height: 600px; overflow-y: auto;">
                     <div class="chart-header">
                         <h2>Orderbook (Live)</h2>
                     </div>
                     <div id="orderbook-container" style="font-family: monospace; font-size: 0.9em;">
-                        <div style="display: flex; justify-content: space-between; color: #a0aec0; margin-bottom: 5px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;">
+                        <div
+                            style="display: flex; justify-content: space-between; color: #a0aec0; margin-bottom: 5px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;">
                             <span>Price</span>
                             <span>Amount</span>
                         </div>
-                        <div id="ob-asks" style="color: #ef4444; display: flex; flex-direction: column-reverse; gap: 4px; margin-bottom: 10px;"></div>
-                        <div style="text-align: center; color: #a0aec0; font-weight: bold; margin: 5px 0;">--- SPREAD ---</div>
-                        <div id="ob-bids" style="color: #10b981; display: flex; flex-direction: column; gap: 4px;"></div>
+                        <div id="ob-asks"
+                            style="color: #ef4444; display: flex; flex-direction: column-reverse; gap: 4px; margin-bottom: 10px;">
+                        </div>
+                        <div style="text-align: center; color: #a0aec0; font-weight: bold; margin: 5px 0;">--- SPREAD
+                            ---</div>
+                        <div id="ob-bids" style="color: #10b981; display: flex; flex-direction: column; gap: 4px;">
+                        </div>
                     </div>
                 </section>
             </div>
@@ -178,6 +194,48 @@
 
     </div>
 
-    <script src="app.js?v=3"></script>
+    <!-- Coin Info Modal -->
+    <div id="coin-modal-overlay" class="modal-overlay" onclick="if(event.target === this) closeCoinModal()">
+        <div class="modal-box glass-card">
+            <button class="modal-close-btn" onclick="closeCoinModal()" aria-label="Close">&times;</button>
+            <div class="modal-header">
+                <img id="modal-coin-icon" src="" alt=""
+                    onerror="this.src='https://assets.coincap.io/assets/icons/btc@2x.png'">
+                <div>
+                    <h2 id="modal-coin-symbol">--</h2>
+                    <div class="modal-price" id="modal-coin-price">$0.00</div>
+                </div>
+            </div>
+            <div class="modal-stats">
+                <div class="modal-stat-box">
+                    <div class="modal-stat-label">SMA (1m)</div>
+                    <div class="modal-stat-value" id="modal-coin-sma">--</div>
+                </div>
+                <div class="modal-stat-box">
+                    <div class="modal-stat-label">Change (~1m)</div>
+                    <div class="modal-stat-value" id="modal-coin-change">--</div>
+                </div>
+                <div class="modal-stat-box">
+                    <div class="modal-stat-label">Volume</div>
+                    <div class="modal-stat-value" id="modal-coin-volume">--</div>
+                </div>
+                <div class="modal-stat-box">
+                    <div class="modal-stat-label">Trades</div>
+                    <div class="modal-stat-value" id="modal-coin-trades">--</div>
+                </div>
+            </div>
+            <div class="modal-forecast" id="modal-coin-forecast">
+                <span>📈 Momentum Signal</span>
+                <strong id="modal-coin-forecast-value">--</strong>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-secondary" onclick="closeCoinModal()">Close</button>
+                <button class="modal-btn modal-btn-primary" onclick="viewCoinCharts()">View Charts &rarr;</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=4"></script>
 </body>
+
 </html>

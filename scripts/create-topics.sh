@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# Create Kafka topics for Realtime Streaming Pipeline
+# Create Kafka topics for the Crypto Streaming Pipeline
 # ============================================================
 # Usage: ./create-topics.sh [KAFKA_BROKER]
 # Default broker: kafka:9092
@@ -13,12 +13,12 @@ MAX_RETRIES=30
 RETRY_INTERVAL=3
 
 echo "=========================================="
-echo "🔧 Kafka Topic Setup"
+echo "🔧 Kafka Topic Setup (Crypto Pipeline)"
 echo "   Broker: ${BROKER}"
 echo "=========================================="
 
 # Wait for Kafka to be ready
-echo "⏳ Waiting for Kafka broker to be ready..."
+echo "⏳ Waiting for Kafka broker..."
 for i in $(seq 1 $MAX_RETRIES); do
     if kafka-broker-api-versions --bootstrap-server "$BROKER" >/dev/null 2>&1; then
         echo "✅ Kafka is ready!"
@@ -32,38 +32,29 @@ for i in $(seq 1 $MAX_RETRIES); do
     sleep "$RETRY_INTERVAL"
 done
 
-# Create purchase-events topic
-echo ""
-echo "📦 Creating topic: purchase-events"
-kafka-topics --create --if-not-exists \
-    --topic purchase-events \
-    --bootstrap-server "$BROKER" \
-    --partitions 6 \
-    --replication-factor 1 \
-    --config retention.ms=604800000 \
-    --config cleanup.policy=delete
+create_topic() {
+    local name=$1
+    local partitions=$2
+    echo "📦 Creating topic: ${name} (partitions=${partitions})"
+    kafka-topics --create --if-not-exists \
+        --topic "$name" \
+        --bootstrap-server "$BROKER" \
+        --partitions "$partitions" \
+        --replication-factor 1 \
+        --config retention.ms=604800000 \
+        --config cleanup.policy=delete
+}
 
-# Create click-events topic
-echo "🖱️  Creating topic: click-events"
-kafka-topics --create --if-not-exists \
-    --topic click-events \
-    --bootstrap-server "$BROKER" \
-    --partitions 3 \
-    --replication-factor 1 \
-    --config retention.ms=604800000 \
-    --config cleanup.policy=delete
+# High-throughput raw trades from Binance
+create_topic crypto-trades 6
+# Downstream indicator stream (1-min SMA)
+create_topic crypto-indicators 3
+# Alert stream (whale trades, downtrends)
+create_topic crypto-alerts 3
 
-# List all topics
 echo ""
 echo "=========================================="
 echo "📋 All topics:"
 kafka-topics --list --bootstrap-server "$BROKER"
-echo ""
-
-# Describe topics
-echo "📝 Topic details:"
-kafka-topics --describe --bootstrap-server "$BROKER" --topic purchase-events
-echo ""
-kafka-topics --describe --bootstrap-server "$BROKER" --topic click-events
 echo "=========================================="
 echo "✅ Topic setup complete!"

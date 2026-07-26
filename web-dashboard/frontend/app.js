@@ -2,6 +2,15 @@
 const currencyFormatter = new Intl.NumberFormat('en-US', {
     style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4
 });
+// Compact formatter for large USD volume figures (e.g. $2.4M) used in the Coin Info Modal
+const compactCurrencyFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 2
+});
+
+// Cache of the most recent /api/data payload, used by the Coin Info Modal so it doesn't
+// need its own network round-trip when a price card is clicked.
+window.lastData = null;
+let currentModalSymbol = null;
 
 // Dynamic state
 let allSymbols = [];
@@ -23,9 +32,9 @@ function getColorForSymbol(sym) {
         'SOLUSDT': { bg: 'rgba(20, 184, 166, 0.8)', border: '#14b8a6' },
         'ADAUSDT': { bg: 'rgba(16, 185, 129, 0.8)', border: '#10b981' },
         'XRPUSDT': { bg: 'rgba(99, 102, 241, 0.8)', border: '#6366f1' },
-        'DOGEUSDT':{ bg: 'rgba(234, 179, 8, 0.8)', border: '#eab308' },
+        'DOGEUSDT': { bg: 'rgba(234, 179, 8, 0.8)', border: '#eab308' },
         'DOTUSDT': { bg: 'rgba(236, 72, 153, 0.8)', border: '#ec4899' },
-        'LINKUSDT':{ bg: 'rgba(59, 130, 246, 0.8)', border: '#3b82f6' }
+        'LINKUSDT': { bg: 'rgba(59, 130, 246, 0.8)', border: '#3b82f6' }
     };
     if (defaultColors[sym]) return defaultColors[sym];
     // Hash string to color
@@ -146,10 +155,10 @@ let lwChart = LightweightCharts.createChart(candlestickContainer, {
 });
 let candleSeries = lwChart.addSeries(LightweightCharts.CandlestickSeries, { upColor: '#10b981', downColor: '#ef4444', borderVisible: false, wickUpColor: '#10b981', wickDownColor: '#ef4444' });
 let smaSeries = lwChart.addSeries(LightweightCharts.LineSeries, { color: '#facc15', lineWidth: 2, crosshairMarkerVisible: false, lastValueVisible: true, priceLineVisible: false });
-let currentCandle = null; 
+let currentCandle = null;
 let isCandleChartInitialized = false;
 
-window.addEventListener('resize', () => { if(lwChart) lwChart.resize(candlestickContainer.clientWidth, 500); });
+window.addEventListener('resize', () => { if (lwChart) lwChart.resize(candlestickContainer.clientWidth, 500); });
 
 // --- DATA FETCHING & UI UPDATE ---
 async function fetchDashboardData() {
@@ -157,7 +166,7 @@ async function fetchDashboardData() {
         const response = await fetch('/api/data');
         if (!response.ok) throw new Error("API Error");
         const jsonResponse = await response.json();
-        
+
         if (jsonResponse.status === 'success') {
             document.getElementById('connection-status').innerText = 'Live';
             document.getElementById('connection-status').style.color = '#10b981';
@@ -175,6 +184,8 @@ function updateUI(data) {
     try {
         const { prices, volumes, trades, smas } = data;
         if (!prices || !volumes) return;
+
+        window.lastData = data;
 
         // Update active coins list
         const currentKeys = Object.keys(prices);
@@ -207,21 +218,21 @@ function updateUI(data) {
             const newTop = sortedByVol.slice(0, 8);
             const addedSymbols = newTop.filter(x => !topSymbols.includes(x));
             topSymbols = newTop;
-            
+
             if (addedSymbols.length > 0) {
                 // Fetch history for newly added top symbols dynamically
                 fetchHistoryData(addedSymbols);
             }
         }
 
-        
+
         // If searched coin is not in top 8, append it so we can see its data
         let displaySymbols = [...new Set([...topSymbols, selectedCoin])];
         if (!prices[selectedCoin]) {
-             displaySymbols = topSymbols;
+            displaySymbols = topSymbols;
         }
 
-        
+
         // 1.5 Update AI Prediction Badge
         if (data.predictions && data.predictions[selectedCoin]) {
             const pred = data.predictions[selectedCoin];
@@ -258,7 +269,9 @@ function updateUI(data) {
             if (!prices[sym]) return;
             const priceEl = document.createElement('div');
             priceEl.className = 'glass-card price-card';
-            
+            priceEl.id = `card-${sym}`;
+            priceEl.addEventListener('click', () => showCoinModal(sym));
+
             const curr = prices[sym];
             let trendClass = '';
             if (previousPrices[sym]) {
@@ -266,7 +279,7 @@ function updateUI(data) {
                 else if (curr < previousPrices[sym]) trendClass = 'price-down';
             }
             previousPrices[sym] = curr;
-            
+
             const baseCoin = sym.replace('USDT', '').toLowerCase();
             priceEl.innerHTML = `
                 <div class="card-info" style="width: 100%; display: flex; align-items: center; gap: 10px;">
@@ -322,11 +335,11 @@ function updateUI(data) {
                 borderWidth: 2, pointRadius: 0, tension: 0.4, fill: false
             };
         });
-        
+
         if (currentTrendFilter === 'ALL_PCT') {
-            priceChart.options.scales.y.ticks.callback = function(value) { return value.toFixed(2) + '%'; };
+            priceChart.options.scales.y.ticks.callback = function (value) { return value.toFixed(2) + '%'; };
         } else {
-            priceChart.options.scales.y.ticks.callback = function(value) { return '$' + value; };
+            priceChart.options.scales.y.ticks.callback = function (value) { return '$' + value; };
         }
         priceChart.update();
 
@@ -335,7 +348,7 @@ function updateUI(data) {
         doughnutChart.data.datasets[0].data = topSymbols.map(s => volumes[s] || 0);
         doughnutChart.data.datasets[0].backgroundColor = topColorsBd;
         doughnutChart.update();
-        
+
         polarChart.data.labels = topLabels;
         polarChart.data.datasets[0].data = topSymbols.map(s => (trades && trades[s]) ? trades[s] : (volumes[s] || 0));
         polarChart.data.datasets[0].backgroundColor = topColorsBg;
@@ -358,7 +371,7 @@ function updateUI(data) {
             return {
                 label: sym.replace('USDT', ''),
                 data: [
-                    Math.log10(volumes[sym] || 1) * 10, 
+                    Math.log10(volumes[sym] || 1) * 10,
                     Math.log10((trades && trades[sym]) ? trades[sym] : 1) * 10,
                     50 + (Math.random() * 20),
                     30 + (Math.random() * 40)
@@ -373,22 +386,17 @@ function updateUI(data) {
         if (candleSeries && prices[selectedCoin]) {
             const coinPrice = prices[selectedCoin];
             const coeff = 1000 * 60; // 1 min
-            const currentMinuteTime = Math.floor(now.getTime() / coeff) * 60; 
-            
+            const currentMinuteTime = Math.floor(now.getTime() / coeff) * 60;
+
             if (!isCandleChartInitialized) {
-                const mockData = [];
-                for(let i = 60; i >= 1; i--) {
-                    let t = currentMinuteTime - (i * 60);
-                    let open = coinPrice * (1 + (Math.random() - 0.5) * 0.002);
-                    let close = coinPrice * (1 + (Math.random() - 0.5) * 0.002);
-                    let high = Math.max(open, close) * (1 + Math.random() * 0.001);
-                    let low = Math.min(open, close) * (1 - Math.random() * 0.001);
-                    mockData.push({ time: t, open: open, high: high, low: low, close: close });
-                }
-                candleSeries.setData(mockData);
+                // Kick off a background fetch of real 1-min klines from Binance.
+                // While it's in flight we set an empty series so the chart doesn't
+                // show fake data. The Kafka-driven live candle updates below
+                // continue independently.
+                fetchBinanceKlines(selectedCoin);
                 isCandleChartInitialized = true;
             }
-            
+
             if (!currentCandle || currentCandle.time !== currentMinuteTime) {
                 currentCandle = { time: currentMinuteTime, open: coinPrice, high: coinPrice, low: coinPrice, close: coinPrice };
             } else {
@@ -397,15 +405,107 @@ function updateUI(data) {
                 currentCandle.close = coinPrice;
             }
             candleSeries.update(currentCandle);
-            
+
             if (smas && smas[selectedCoin] && smaSeries) {
                 smaSeries.update({ time: currentMinuteTime, value: smas[selectedCoin] });
             }
         }
-    } catch(e) {
+    } catch (e) {
         console.error("Error updating UI:", e);
     }
 }
+
+// --- COIN INFO MODAL ---
+
+// Approximates % price change over the last ~1 minute using the client-side rolling
+// priceHistory buffer (polled every 1s, up to 60 points). This is a client-side estimate,
+// not an exact snapshot from the backend, so results can vary slightly depending on how
+// long the dashboard has been open / when history was last (re)loaded for that symbol.
+function getPriceChangePct(sym, currentPrice) {
+    const hist = priceHistory[sym];
+    if (!hist || hist.length < 2 || !currentPrice) return null;
+    const past = hist[0];
+    if (!past) return null;
+    return ((currentPrice - past) / past) * 100;
+}
+
+function showCoinModal(sym) {
+    const data = window.lastData;
+    if (!data || !data.prices || !data.prices[sym]) return;
+
+    currentModalSymbol = sym;
+    const { prices, volumes, trades, smas, predictions } = data;
+    const price = prices[sym];
+    const baseCoin = sym.replace('USDT', '').toLowerCase();
+
+    document.getElementById('modal-coin-icon').src = `https://assets.coincap.io/assets/icons/${baseCoin}@2x.png`;
+    document.getElementById('modal-coin-symbol').innerText = sym;
+    document.getElementById('modal-coin-price').innerText = currencyFormatter.format(price);
+
+    const sma = smas && smas[sym];
+    document.getElementById('modal-coin-sma').innerText = sma ? currencyFormatter.format(sma) : '--';
+
+    const changePct = getPriceChangePct(sym, price);
+    const changeEl = document.getElementById('modal-coin-change');
+    if (changePct === null) {
+        changeEl.innerText = '--';
+        changeEl.className = 'modal-stat-value';
+    } else {
+        changeEl.innerText = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+        changeEl.className = 'modal-stat-value ' + (changePct >= 0 ? 'price-up' : 'price-down');
+    }
+
+    document.getElementById('modal-coin-volume').innerText = volumes[sym] ? compactCurrencyFormatter.format(volumes[sym]) : '--';
+    document.getElementById('modal-coin-trades').innerText = (trades && trades[sym]) ? Number(trades[sym]).toLocaleString('en-US') : '0';
+
+    const forecastBox = document.getElementById('modal-coin-forecast');
+    const forecastVal = document.getElementById('modal-coin-forecast-value');
+    const pred = predictions && predictions[sym];
+    if (pred) {
+        const colors = { UPTREND: '#10b981', DOWNTREND: '#ef4444', SIDEWAYS: '#94a3b8' };
+        const c = colors[pred.direction] || '#94a3b8';
+        forecastBox.style.borderColor = c;
+        forecastBox.style.background = c + '20';
+        forecastVal.innerText = `${pred.direction} (${pred.confidence}%)`;
+        forecastVal.style.color = c;
+    } else {
+        forecastBox.style.borderColor = '';
+        forecastBox.style.background = '';
+        forecastVal.innerText = 'No data yet';
+        forecastVal.style.color = 'var(--text-muted)';
+    }
+
+    document.getElementById('coin-modal-overlay').classList.add('active');
+}
+
+function closeCoinModal() {
+    document.getElementById('coin-modal-overlay').classList.remove('active');
+    currentModalSymbol = null;
+}
+
+function viewCoinCharts() {
+    if (!currentModalSymbol) return;
+    const sym = currentModalSymbol;
+    closeCoinModal();
+
+    // Switch to the Professional tab by reusing its existing click handler
+    // (also takes care of resizing the Lightweight Charts candlestick chart).
+    const proTabBtn = document.querySelector('.tab-btn[data-tab="tab-pro"]');
+    if (proTabBtn) proTabBtn.click();
+
+    // Setting the search box + dispatching 'change' reuses every existing listener
+    // (selectedCoin update, candlestick reset, history fetch, orderbook reconnect)
+    // instead of duplicating that logic here.
+    const coinSearch = document.getElementById('coinSearch');
+    if (coinSearch) {
+        coinSearch.value = sym;
+        coinSearch.dispatchEvent(new Event('change'));
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeCoinModal();
+});
 
 // Fetch loop
 async function fetchHistoryData(symbols) {
@@ -414,14 +514,14 @@ async function fetchHistoryData(symbols) {
         const response = await fetch(`/api/history?symbols=${symStr}`);
         if (!response.ok) throw new Error("API History Error");
         const jsonResponse = await response.json();
-        
+
         if (jsonResponse.status === 'success') {
             const historyData = jsonResponse.data;
             symbols.forEach(sym => {
                 if (historyData[sym] && historyData[sym].length > 0) {
                     basePrices[sym] = historyData[sym][0].price;
                     priceHistory[sym] = historyData[sym].map(record => record.price);
-                    
+
                     // Populate timeLabels only once
                     if (sym === symbols[0]) {
                         timeLabels = historyData[sym].map(record => {
@@ -430,48 +530,60 @@ async function fetchHistoryData(symbols) {
                         });
                         priceChart.data.labels = timeLabels;
                     }
-                    
-                    // If selectedCoin, populate candlestick
-                    if (sym === selectedCoin && candleSeries) {
-                        const candleData = [];
-                        historyData[sym].forEach(record => {
-                            const safeTimeStr = record.time.replace(' ', 'T') + 'Z'; 
-                            let t = new Date(safeTimeStr).getTime() / 1000;
-                            const p = record.price;
-                            let open = p * (1 + (Math.random() - 0.5) * 0.002);
-                            let close = p * (1 + (Math.random() - 0.5) * 0.002);
-                            let high = Math.max(open, close) * (1 + Math.random() * 0.001);
-                            let low = Math.min(open, close) * (1 - Math.random() * 0.001);
-                            candleData.push({ time: t, open: open, high: high, low: low, close: close });
-                        });
 
-                        candleData.sort((a, b) => a.time - b.time);
-                        candleSeries.setData(candleData);
+                    // For candlesticks/RSI on selectedCoin, we do NOT synthesize OHLC
+                    // from Redis avg-price. Real 1-min klines are fetched from
+                    // Binance separately via fetchBinanceKlines().
+                    if (sym === selectedCoin) {
+                        fetchBinanceKlines(sym);
                         isCandleChartInitialized = true;
-                        
-                        // Compute and set RSI
-                        const closePrices = candleData.map(c => c.close);
-                        const rsiValues = calculateRSI(closePrices, 14);
-                        if (rsiSeries && rsiValues.length > 0) {
-                            const rsiChartData = [];
-                            // RSI array is shorter than closePrices by 14
-                            const offset = closePrices.length - rsiValues.length;
-                            for (let i = 0; i < rsiValues.length; i++) {
-                                rsiChartData.push({
-                                    time: candleData[i + offset].time,
-                                    value: rsiValues[i]
-                                });
-                            }
-                            rsiSeries.setData(rsiChartData);
-                        }
-
                     }
                 }
             });
             priceChart.update();
         }
-    } catch(e) {
+    } catch (e) {
         console.error("Failed to fetch history:", e);
+    }
+}
+
+// --- REAL CANDLESTICK DATA (Binance klines REST) ---
+// Pulls the last 60 one-minute klines for `symbol` and hydrates the candlestick
+// series + RSI series. This replaces the previous approach that decorated
+// Redis avg-price with Math.random() noise, which was misleading.
+async function fetchBinanceKlines(symbol, interval = '1m', limit = 60) {
+    if (!candleSeries) return;
+    try {
+        const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Binance klines HTTP ${resp.status}`);
+        const rows = await resp.json();
+        // Binance kline row: [openTime, open, high, low, close, volume, closeTime, ...]
+        const candleData = rows.map(k => ({
+            time: Math.floor(k[0] / 1000),
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+        }));
+        // Only apply if user hasn't switched coins mid-request
+        if (symbol !== selectedCoin) return;
+        candleSeries.setData(candleData);
+        currentCandle = candleData[candleData.length - 1] || null;
+
+        // Compute RSI on real closes
+        const closes = candleData.map(c => c.close);
+        const rsiValues = calculateRSI(closes, 14);
+        if (rsiSeries && rsiValues.length > 0) {
+            const offset = closes.length - rsiValues.length;
+            const rsiChartData = rsiValues.map((v, i) => ({
+                time: candleData[i + offset].time,
+                value: v,
+            }));
+            rsiSeries.setData(rsiChartData);
+        }
+    } catch (e) {
+        console.error(`fetchBinanceKlines(${symbol}) failed:`, e);
     }
 }
 
@@ -504,11 +616,11 @@ fetchHistoryData(topSymbols).then(() => {
 
 // --- SSE ALERTS LISTENER ---
 const alertSource = new EventSource('/api/alerts/stream');
-alertSource.onmessage = function(event) {
+alertSource.onmessage = function (event) {
     try {
         const alertData = JSON.parse(event.data);
         showToast(alertData.alert_type, alertData.message);
-    } catch(e) {}
+    } catch (e) { }
 };
 
 function showToast(type, message) {
@@ -539,7 +651,7 @@ function connectOrderbook(symbol) {
     }
     const wsUrl = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@depth10@100ms`;
     orderbookWs = new WebSocket(wsUrl);
-    
+
     orderbookWs.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.bids && data.asks) {
@@ -552,7 +664,7 @@ function updateOrderbookUI(bids, asks) {
     const bidsContainer = document.getElementById('ob-bids');
     const asksContainer = document.getElementById('ob-asks');
     if (!bidsContainer || !asksContainer) return;
-    
+
     // Asks (Red)
     asksContainer.innerHTML = '';
     asks.slice(0, 10).forEach(ask => {
@@ -562,7 +674,7 @@ function updateOrderbookUI(bids, asks) {
         row.innerHTML = `<span>${parseFloat(ask[0]).toFixed(4)}</span><span>${parseFloat(ask[1]).toFixed(4)}</span>`;
         asksContainer.appendChild(row);
     });
-    
+
     // Bids (Green)
     bidsContainer.innerHTML = '';
     bids.slice(0, 10).forEach(bid => {
@@ -577,7 +689,7 @@ function updateOrderbookUI(bids, asks) {
 // Ensure Orderbook updates when coin changes
 document.addEventListener('DOMContentLoaded', () => {
     connectOrderbook(selectedCoin);
-    
+
     const coinSearch = document.getElementById('coinSearch');
     if (coinSearch) {
         coinSearch.addEventListener('change', (e) => {
@@ -603,24 +715,24 @@ let rsiSeries = null;
 function calculateRSI(prices, period = 14) {
     if (prices.length <= period) return [];
     let gains = 0, losses = 0;
-    
+
     for (let i = 1; i <= period; i++) {
-        let diff = prices[i] - prices[i-1];
+        let diff = prices[i] - prices[i - 1];
         if (diff > 0) gains += diff;
         else losses -= diff;
     }
-    
+
     let avgGain = gains / period;
     let avgLoss = losses / period;
     let rsiData = [];
-    
+
     for (let i = period; i < prices.length; i++) {
         let rs = avgGain / (avgLoss === 0 ? 1 : avgLoss);
         let rsi = 100 - (100 / (1 + rs));
         rsiData.push(rsi);
-        
+
         if (i < prices.length - 1) {
-            let diff = prices[i+1] - prices[i];
+            let diff = prices[i + 1] - prices[i];
             let currentGain = diff > 0 ? diff : 0;
             let currentLoss = diff < 0 ? -diff : 0;
             avgGain = ((avgGain * (period - 1)) + currentGain) / period;

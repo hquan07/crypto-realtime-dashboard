@@ -1,3 +1,24 @@
+"""
+Momentum Signal Service
+========================
+Consumes crypto trades from Kafka and computes a simple **momentum indicator**
+per symbol using a rolling 20-tick window. This is NOT a machine-learning model
+— it's a lightweight technical signal:
+
+    change = (mean(last 5 prices) - mean(first 5 prices)) / mean(first 5 prices)
+
+    change >  0.001  →  UPTREND
+    change < -0.001  →  DOWNTREND
+    otherwise        →  SIDEWAYS
+
+The `confidence` field is a rough proxy (|change| × 10000, capped at 99) so the
+UI has something to display; it is not a calibrated probability.
+
+Signals are written to Redis hash `crypto:prediction` for the dashboard to pick up.
+Kept under this name (and directory `ml-service/`) for backwards compatibility with
+existing docker-compose service names and Redis keys.
+"""
+
 import os
 import json
 import time
@@ -8,13 +29,13 @@ from collections import deque
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("ml-predictor")
+logger = logging.getLogger("momentum-signal")
 
 KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:29092')
 REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
 
-# We'll use a simple moving window momentum strategy for demonstration
-# In production, you would load a PyTorch/TensorFlow model here
+# Rolling window for the momentum indicator.
+# See module docstring for the exact rule.
 WINDOW_SIZE = 20
 prices = {}
 
@@ -80,7 +101,7 @@ for message in consumer:
         if prediction:
             # Publish prediction to Redis for the backend to read
             r.hset("crypto:prediction", sym, json.dumps(prediction))
-            logger.info(f"AI Forecast for {sym}: {prediction}")
+            logger.info(f"Momentum signal for {sym}: {prediction}")
             # To avoid spamming, clear half the window after predicting
             for _ in range(WINDOW_SIZE // 2):
                 prices[sym].popleft()
