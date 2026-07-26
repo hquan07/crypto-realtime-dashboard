@@ -609,9 +609,38 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 fetchHistoryData(topSymbols).then(() => {
+    // Initial one-shot fetch so the UI has data immediately on page load
+    // (the SSE stream's first frame is delayed by up to SSE_INTERVAL_SEC).
     fetchDashboardData();
-    setInterval(fetchDashboardData, 1000);
+    // Live updates via SSE (server pushes every ~2s). Replaces the previous
+    // setInterval(fetchDashboardData, 1000) which polled 5x more often than
+    // the underlying Flink windows actually produce new data.
+    connectDataStream();
 });
+
+let dataSource = null;
+function connectDataStream() {
+    if (dataSource) dataSource.close();
+    dataSource = new EventSource('/api/data/stream');
+    dataSource.onmessage = (event) => {
+        try {
+            const parsed = JSON.parse(event.data);
+            if (parsed.status === 'success') {
+                document.getElementById('connection-status').innerText = 'Live';
+                document.getElementById('connection-status').style.color = '#10b981';
+                document.querySelector('.dot').style.backgroundColor = '#10b981';
+                updateUI(parsed.data);
+            }
+        } catch (e) { /* ignore malformed frame */ }
+    };
+    dataSource.onerror = () => {
+        // EventSource auto-reconnects on error with exponential backoff;
+        // just flip the status pill so the user sees it.
+        document.getElementById('connection-status').innerText = 'Reconnecting';
+        document.getElementById('connection-status').style.color = '#ef4444';
+        document.querySelector('.dot').style.backgroundColor = '#ef4444';
+    };
+}
 
 
 // --- SSE ALERTS LISTENER ---

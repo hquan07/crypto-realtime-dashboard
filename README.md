@@ -128,10 +128,26 @@ jobs (`crypto_aggregation`, `crypto_indicators`, `crypto_alerts`).
 | Service               | URL                                     |
 | --------------------- | --------------------------------------- |
 | **Crypto Dashboard**  | http://localhost:8000                   |
+| Backend health check  | http://localhost:8000/health            |
+| Producer health check | http://localhost:8080/health *(inside the container network — expose the port if you want to hit it from the host)* |
 | Flink Web UI          | http://localhost:8081                   |
 | Kibana                | http://localhost:5601                   |
 | Elasticsearch         | http://localhost:9200                   |
 | Redis CLI             | `docker exec -it redis redis-cli`       |
+
+### Run the test suite
+
+```bash
+pip install -r requirements-dev.txt \
+            -r web-dashboard/backend/requirements.txt \
+            -r ml-service/requirements.txt \
+            -r producer/requirements.txt
+pytest
+```
+
+24 tests cover the momentum indicator, producer transform + sharding, and
+the FastAPI endpoints (`/health`, `/api/data`, `/api/history`) using
+`fakeredis` and a stubbed Elasticsearch.
 
 ### Stop everything
 
@@ -268,14 +284,15 @@ slightly out of order).
 
 ## Known limitations & roadmap
 
-- **Frontend polls `/api/data` every 1 s.** Fine for local demo; would move to
-  WebSocket / SSE for prices in production.
-- **~450 USDT pairs on a single WebSocket connection.** Binance allows up to
-  1024 streams per connection, so this is under the limit, but a real deployment
-  should shard across multiple connections and reconnect with backoff.
+- ~~Frontend polls `/api/data` every 1 s.~~ ✅ Replaced with SSE
+  (`/api/data/stream`, 2 s cadence) — matches the underlying 5 s Flink window.
+- ~~All ~450 USDT pairs on a single WebSocket connection.~~ ✅ Now sharded
+  across `NUM_SHARDS` connections (default 2), each with independent
+  exponential-backoff reconnect and a shared health tracker.
 - **Momentum signal is a heuristic, not ML.** Replace `predict_trend()` in
   `ml-service/predictor.py` to plug in a real model.
-- **No tests / CI yet.** On the near-term list.
+- **No CI pipeline yet.** Tests exist locally (`pytest`) but nothing wires them
+  into GitHub Actions on push.
 
 ---
 
