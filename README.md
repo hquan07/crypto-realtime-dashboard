@@ -31,9 +31,9 @@ Binance WebSocket ─────►│ crypto_producer.py  (~450 USDT pairs)  �
                    │                     │                     │
                    ▼                     ▼                     ▼
           ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-          │  Elasticsearch   │  │  Kafka           │  │  Kafka           │
-          │  crypto-by-min   │  │  crypto-         │  │  crypto-alerts   │
-          │                  │  │  indicators      │  │                  │
+          │  ClickHouse      │  │  Kafka           │  │  Kafka           │
+          │  crypto_by_min   │  │  crypto-         │  │  crypto-alerts   │
+          │  (MergeTree)     │  │  indicators      │  │                  │
           └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
                    │                     ▼                     ▼
                    │           ┌──────────────────┐  ┌──────────────────┐
@@ -51,7 +51,7 @@ Binance WebSocket ─────►│ crypto_producer.py  (~450 USDT pairs)  �
                              ┌───────────────────────┐
                              │  FastAPI backend      │
                              │  /api/data            │
-                             │  /api/history  (ES)   │
+                             │  /api/history  (CH)   │
                              │  /api/alerts/stream   │  (SSE)
                              └───────────┬───────────┘
                                          ▼
@@ -68,7 +68,7 @@ Binance WebSocket ─────►│ crypto_producer.py  (~450 USDT pairs)  �
 | Message broker      | Apache Kafka (Confluent 7.6)           | Buffer for ~thousands of trades/sec         |
 | Stream processing   | Apache Flink 1.19 (SQL, tumbling/HOP)  | Aggregation, SMA, alerts                    |
 | Fast store          | Redis 7                                | Sub-ms reads for prices/volumes/SMAs        |
-| Analytics store     | Elasticsearch 7.17                     | 1-minute historical bars                    |
+| Analytics store     | ClickHouse 24.3 (MergeTree)            | 1-minute historical bars                    |
 | Momentum signal     | Python + NumPy                         | Rolling-window UPTREND / DOWNTREND flag     |
 | API + frontend      | FastAPI + Chart.js + Lightweight Charts | Dashboard at `http://localhost:8000`        |
 | Infrastructure      | Docker Compose                         | One-command local deployment                |
@@ -97,7 +97,7 @@ Binance WebSocket ─────►│ crypto_producer.py  (~450 USDT pairs)  �
 ### Prerequisites
 
 - Docker Engine ≥ 24, Docker Compose ≥ 2.20
-- **8 GB+ RAM recommended** — Elasticsearch and Flink each want ~512 MB min.
+- **6 GB+ RAM recommended** — Flink wants ~512 MB min; ClickHouse is lightweight.
 
 ### 1. Start infrastructure
 
@@ -107,20 +107,20 @@ docker compose up -d
 
 This spins up Zookeeper, Kafka (auto-creates `crypto-trades`,
 `crypto-indicators`, `crypto-alerts`), Flink JobManager + TaskManager,
-Redis, Elasticsearch, Kibana, the Python producer, stream-processing
-consumers, momentum-signal service, and the FastAPI dashboard.
+Redis, ClickHouse, the Python producer, stream-processing consumers,
+momentum-signal service, and the FastAPI dashboard.
 
 ### 2. Install Flink connectors + submit SQL jobs
 
-The Flink SQL jobs need the Kafka + Elasticsearch connector JARs and have to
-be submitted once. A helper script does both:
+The Flink SQL jobs need the Kafka + JDBC connector JARs (plus the ClickHouse
+JDBC driver) and have to be submitted once. A helper script does it all:
 
 ```bash
 ./scripts/setup-pipeline.sh
 ```
 
 This downloads the connector JARs into the Flink containers, restarts Flink,
-creates the `crypto-by-minute` Elasticsearch index, and submits all three SQL
+creates the `crypto_by_minute` ClickHouse table, and submits all three SQL
 jobs (`crypto_aggregation`, `crypto_indicators`, `crypto_alerts`).
 
 ### 3. Open the dashboard
@@ -131,8 +131,7 @@ jobs (`crypto_aggregation`, `crypto_indicators`, `crypto_alerts`).
 | Backend health check  | http://localhost:8000/health            |
 | Producer health check | http://localhost:8080/health *(inside the container network — expose the port if you want to hit it from the host)* |
 | Flink Web UI          | http://localhost:8081                   |
-| Kibana                | http://localhost:5601                   |
-| Elasticsearch         | http://localhost:9200                   |
+| ClickHouse HTTP       | http://localhost:8123                   |
 | Redis CLI             | `docker exec -it redis redis-cli`       |
 
 ### Run the test suite
@@ -147,12 +146,12 @@ pytest
 
 24 tests cover the momentum indicator, producer transform + sharding, and
 the FastAPI endpoints (`/health`, `/api/data`, `/api/history`) using
-`fakeredis` and a stubbed Elasticsearch.
+`fakeredis` and a stubbed ClickHouse client.
 
 ### Stop everything
 
 ```bash
-docker compose down -v   # -v also wipes Kafka/Redis/ES volumes
+docker compose down -v   # -v also wipes Kafka/Redis/ClickHouse volumes
 ```
 
 ---
@@ -161,7 +160,7 @@ docker compose down -v   # -v also wipes Kafka/Redis/ES volumes
 
 ```
 crypto-realtime-dashboard/
-├── docker-compose.yml              # All 10 services + volumes + network
+├── docker-compose.yml              # All services + volumes + network
 ├── .env.example                    # Env-var overrides for local runs
 ├── producer/
 │   ├── crypto_producer.py          # Binance WS → Kafka crypto-trades
@@ -169,12 +168,12 @@ crypto-realtime-dashboard/
 │   └── Dockerfile
 ├── stream-processing/
 │   ├── flink-sql-jobs/
-│   │   ├── crypto_aggregation.sql  # 5s tumbling → ES crypto-by-minute
+│   │   ├── crypto_aggregation.sql  # 5s tumbling → ClickHouse crypto_by_minute
 │   │   ├── crypto_indicators.sql   # 1m SMA via HOP window → Kafka
 │   │   └── crypto_alerts.sql       # Whale + 3-drop CEP → Kafka
 │   ├── indicator_consumer.py       # crypto-indicators → Redis hash
 │   ├── alert_consumer.py           # crypto-alerts → Redis Pub/Sub
-│   ├── redis_sink_crypto.py        # ES crypto-by-minute → Redis (prices/vol/trades)
+│   ├── redis_sink_crypto.py        # ClickHouse crypto_by_minute → Redis (prices/vol/trades)
 │   └── Dockerfile
 ├── ml-service/
 │   ├── predictor.py                # Momentum signal (NOT ML — see below)
@@ -192,7 +191,7 @@ crypto-realtime-dashboard/
 │   └── Dockerfile
 ├── scripts/
 │   ├── create-topics.sh            # Manual topic setup (usually not needed)
-│   └── setup-pipeline.sh           # Connectors + ES index + Flink jobs
+│   └── setup-pipeline.sh           # Connectors + ClickHouse table + Flink jobs
 └── README.md
 ```
 

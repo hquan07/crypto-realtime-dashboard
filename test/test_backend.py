@@ -1,6 +1,6 @@
 """API tests for the FastAPI dashboard backend.
 
-Uses fakeredis to stand in for a live Redis and monkeypatches Elasticsearch
+Uses fakeredis to stand in for a live Redis and monkeypatches ClickHouse
 so tests don't touch the network.
 """
 import json
@@ -12,22 +12,28 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(monkeypatch):
-    """Fresh FastAPI TestClient with fakeredis + a stubbed Elasticsearch."""
+    """Fresh FastAPI TestClient with fakeredis + a stubbed ClickHouse client."""
     # Substitute redis.Redis BEFORE importing the app, so the module-level
     # `r = redis.Redis(...)` call gets our fake.
     import redis as redis_lib
     fake = fakeredis.FakeStrictRedis(decode_responses=True)
     monkeypatch.setattr(redis_lib, "Redis", lambda **kw: fake)
 
-    # Stub Elasticsearch so its constructor doesn't try to open a real socket.
-    class _StubES:
-        def __init__(self, *a, **kw): pass
-        def ping(self): return True
-        def info(self): return {"version": {"number": "7.17.0"}}
-        def search(self, index, body, **kw):
-            return {"hits": {"hits": []}}
-    import elasticsearch
-    monkeypatch.setattr(elasticsearch, "Elasticsearch", _StubES)
+    # Stub clickhouse_connect so its get_client doesn't try to open a real socket.
+    class _StubQueryResult:
+        def __init__(self, rows=None):
+            self.result_rows = rows or []
+
+    class _StubCH:
+        def __init__(self, *a, **kw):
+            pass
+        def ping(self):
+            return True
+        def query(self, query_str, parameters=None, **kw):
+            return _StubQueryResult()
+
+    import clickhouse_connect
+    monkeypatch.setattr(clickhouse_connect, "get_client", lambda **kw: _StubCH())
 
     # Re-import app cleanly to pick up the patches.
     import importlib, sys
@@ -114,7 +120,7 @@ def test_api_history_shape_with_no_data(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "success"
-    # Both requested symbols must appear in the response even with no ES data.
+    # Both requested symbols must appear in the response even with no CH data.
     assert set(body["data"].keys()) == {"BTCUSDT", "ETHUSDT"}
     assert body["data"]["BTCUSDT"] == []
 

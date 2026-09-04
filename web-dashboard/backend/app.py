@@ -4,9 +4,9 @@ Crypto Realtime Dashboard — FastAPI backend
 Exposes:
     GET  /api/data              — one-shot snapshot from Redis
     GET  /api/data/stream       — SSE push, 2s cadence (replaces client polling)
-    GET  /api/history?symbols=  — historical 1-min bars from Elasticsearch
+    GET  /api/history?symbols=  — historical 1-min bars from ClickHouse
     GET  /api/alerts/stream     — SSE for whale/downtrend alerts from Redis Pub/Sub
-    GET  /health                — liveness + Redis/ES connectivity check
+    GET  /health                — liveness + Redis/ClickHouse connectivity check
     GET  /                      — static frontend
 """
 
@@ -17,11 +17,11 @@ import asyncio
 from typing import Any, Dict
 
 import redis
+import clickhouse_connect
 from fastapi import FastAPI, Query, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from elasticsearch import Elasticsearch
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -37,7 +37,8 @@ logger = logging.getLogger("dashboard-api")
 # ---------------------------------------------------------------------------
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
+CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST", "localhost")
+CLICKHOUSE_PORT = int(os.getenv("CLICKHOUSE_PORT", "8123"))
 SSE_INTERVAL_SEC = float(os.getenv("SSE_INTERVAL_SEC", "2.0"))
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,10 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(_app):
-    logger.info("dashboard-api starting: REDIS_HOST=%s ES_HOST=%s", REDIS_HOST, ES_HOST)
+    logger.info(
+        "dashboard-api starting: REDIS_HOST=%s CLICKHOUSE_HOST=%s:%s",
+        REDIS_HOST, CLICKHOUSE_HOST, CLICKHOUSE_PORT,
+    )
     # Best-effort connectivity check — do NOT fail startup if downstream is not up
     # yet, because docker-compose may bring services up in parallel.
     try:
@@ -57,10 +61,10 @@ async def lifespan(_app):
     except redis.RedisError as e:
         logger.warning("Redis not reachable at startup (%s). Will retry per-request.", e)
     try:
-        es.info()
-        logger.info("Elasticsearch reachable at %s", ES_HOST)
+        ch.ping()
+        logger.info("ClickHouse reachable at %s:%s", CLICKHOUSE_HOST, CLICKHOUSE_PORT)
     except Exception as e:
-        logger.warning("Elasticsearch not reachable at startup (%s). Will retry per-request.", e)
+        logger.warning("ClickHouse not reachable at startup (%s). Will retry per-request.", e)
     yield
 
 
@@ -83,7 +87,13 @@ r = redis.Redis(
     retry_on_timeout=True,
     health_check_interval=30,
 )
-es = Elasticsearch(ES_HOST, request_timeout=5)
+ch = clickhouse_connect.get_client(
+    host=CLICKHOUSE_HOST,
+    port=CLICKHOUSE_PORT,
+    database="cryptodb",
+    connect_timeout=5,
+    send_receive_timeout=5,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -111,19 +121,19 @@ def _fetch_snapshot() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    """Liveness + dependency check. Returns 503 if Redis is down (ES is optional)."""
+    """Liveness + dependency check. Returns 503 if Redis is down (ClickHouse is optional)."""
     redis_ok = False
-    es_ok = False
+    ch_ok = False
     try:
         redis_ok = bool(r.ping())
     except redis.RedisError as e:
         logger.warning("health: Redis ping failed: %s", e)
     try:
-        es_ok = bool(es.ping())
+        ch_ok = bool(ch.ping())
     except Exception as e:
-        logger.warning("health: ES ping failed: %s", e)
+        logger.warning("health: ClickHouse ping failed: %s", e)
 
-    body = {"status": "ok" if redis_ok else "degraded", "redis": redis_ok, "elasticsearch": es_ok}
+    body = {"status": "ok" if redis_ok else "degraded", "redis": redis_ok, "clickhouse": ch_ok}
     if not redis_ok:
         raise HTTPException(status_code=503, detail=body)
     return body
@@ -168,27 +178,26 @@ async def data_stream() -> StreamingResponse:
 
 @app.get("/api/history")
 def get_crypto_history(symbols: str = Query("BTCUSDT", description="Comma-separated symbols")) -> Dict[str, Any]:
-    """Historical 1-minute bars from Elasticsearch, up to 60 per symbol."""
+    """Historical 1-minute bars from ClickHouse, up to 60 per symbol."""
     symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] or ["BTCUSDT"]
     history_data: Dict[str, list] = {}
     try:
         for sym in symbol_list:
-            resp = es.search(
-                index="crypto-by-minute",
-                body={
-                    "query": {"term": {"symbol": sym}},
-                    "sort":  [{"window_start": "desc"}],
-                    "size":  60,
-                },
+            result = ch.query(
+                "SELECT window_start, avg_price, total_volume, trade_count "
+                "FROM crypto_by_minute "
+                "WHERE symbol = {sym:String} "
+                "ORDER BY window_start DESC "
+                "LIMIT 60",
+                parameters={"sym": sym},
             )
             records = []
-            for hit in resp["hits"]["hits"]:
-                src = hit["_source"]
+            for row in result.result_rows:
                 records.append({
-                    "time":   src["window_start"],
-                    "price":  src["avg_price"],
-                    "volume": src["total_volume"],
-                    "trades": src["trade_count"],
+                    "time":   str(row[0]),
+                    "price":  row[1],
+                    "volume": row[2],
+                    "trades": row[3],
                 })
             records.reverse()  # oldest → newest
             history_data[sym] = records
@@ -196,7 +205,7 @@ def get_crypto_history(symbols: str = Query("BTCUSDT", description="Comma-separa
     except Exception as e:
         logger.error("/api/history error for symbols=%s: %s", symbols, e)
         # Return 503 rather than 200 so client-side error handling can trigger.
-        raise HTTPException(status_code=503, detail=f"Elasticsearch unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"ClickHouse unavailable: {e}")
 
 
 @app.get("/api/alerts/stream")

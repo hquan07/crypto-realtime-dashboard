@@ -24,7 +24,7 @@ CREATE TABLE crypto_trades (
 );
 
 
--- 2. Create Sink Table to Elasticsearch (Aggregated by Minute)
+-- 2. Create Sink Table to ClickHouse via JDBC (Aggregated by Minute)
 CREATE TABLE crypto_revenue_by_minute (
     window_start    TIMESTAMP(3),
     window_end      TIMESTAMP(3),
@@ -34,13 +34,17 @@ CREATE TABLE crypto_revenue_by_minute (
     avg_price       DOUBLE,
     PRIMARY KEY (symbol, window_start) NOT ENFORCED
 ) WITH (
-    'connector' = 'elasticsearch-7',
-    'hosts' = 'http://elasticsearch:9200',
-    'index' = 'crypto-by-minute'
+    'connector' = 'jdbc',
+    'url' = 'jdbc:clickhouse://clickhouse:8123/cryptodb',
+    'table-name' = 'crypto_by_minute',
+    'username' = 'default',
+    'password' = '',
+    'sink.buffer-flush.max-rows' = '500',
+    'sink.buffer-flush.interval' = '5s'
 );
 
 
--- 3. Tumbling Window Aggregation (5 Seconds) -> Insert into ES
+-- 3. Tumbling Window Aggregation (5 Seconds) -> Insert into ClickHouse
 INSERT INTO crypto_revenue_by_minute
 SELECT
     window_start,
