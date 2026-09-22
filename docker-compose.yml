@@ -285,22 +285,22 @@ services:
       - streaming-net
 
   # --------------------------------------------------------
-  # Web Dashboard — FastAPI + Static frontend
+  # Web Dashboard Backend (FastAPI + GraphQL)
   # --------------------------------------------------------
-  web-dashboard:
+  backend:
     build:
-      context: ./web-dashboard
+      context: ./web-dashboard/backend
       dockerfile: Dockerfile
       network: host
-    container_name: web-dashboard
+    container_name: backend
     depends_on:
       redis:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
     volumes:
-      - ./web-dashboard/backend:/app/backend
-      - ./web-dashboard/frontend:/app/frontend
+      - ./web-dashboard/backend:/app
+      - dashboard-db:/app/dashboard.db
     environment:
       REDIS_HOST: redis
       CLICKHOUSE_HOST: clickhouse
@@ -317,6 +317,22 @@ services:
     networks:
       - streaming-net
 
+  # --------------------------------------------------------
+  # Frontend Dashboard (Next.js)
+  # --------------------------------------------------------
+  frontend:
+    image: node:20-alpine
+    container_name: frontend
+    working_dir: /app
+    volumes:
+      - ./web-dashboard/frontend-next:/app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - streaming-net
+
 # ============================================================
 # Volumes
 # ============================================================
@@ -328,6 +344,7 @@ volumes:
   flink-savepoints:
   redis-data:
   clickhouse-data:
+  dashboard-db:
 
     # ============================================================
     # Networks
