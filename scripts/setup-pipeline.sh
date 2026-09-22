@@ -19,31 +19,9 @@ echo "============================================================"
 echo "🔧 Step 1: Install Flink Connectors (Kafka + JDBC)"
 echo "============================================================"
 
-install_jar() {
-    local container=$1
-    local url=$2
-    local jar
-    jar=$(basename "$url")
-    docker exec "$container" bash -c "
-        cd /opt/flink/lib
-        if [ -f '$jar' ]; then
-            echo '  ✓ $jar already present in $container'
-        else
-            echo '  ↓ downloading $jar into $container'
-            curl -sfLO '$url'
-        fi
-    "
-}
-
-KAFKA_JAR="https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.2.0-1.19/flink-sql-connector-kafka-3.2.0-1.19.jar"
-JDBC_JAR="https://repo1.maven.org/maven2/org/apache/flink/flink-connector-jdbc/3.2.0-1.19/flink-connector-jdbc-3.2.0-1.19.jar"
-CH_JDBC_JAR="https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.6.0-patch5/clickhouse-jdbc-0.6.0-patch5-all.jar"
-
-for c in "$JOB_MANAGER" "$TASK_MANAGER"; do
-    install_jar "$c" "$KAFKA_JAR"
-    install_jar "$c" "$JDBC_JAR"
-    install_jar "$c" "$CH_JDBC_JAR"
-done
+echo "============================================================"
+echo "🔧 Step 1: Skipping Connector Install (Baked in Dockerfile)"
+echo "============================================================"
 
 echo ""
 echo "============================================================"
@@ -80,13 +58,10 @@ SETTINGS index_granularity = 8192
 
 echo ""
 echo "============================================================"
-echo "🔧 Step 4: Submit Flink SQL jobs"
+echo "🔧 Step 4: Submit PyFlink Jobs"
 echo "============================================================"
-for job in crypto_aggregation crypto_indicators crypto_alerts; do
-    echo "  → submitting ${job}.sql"
-    docker exec "$JOB_MANAGER" /opt/flink/bin/sql-client.sh \
-        -f "/opt/flink/usrlib/flink-sql-jobs/${job}.sql" 2>&1 | tail -3
-done
+echo "  → submitting crypto_patterns.py"
+docker exec "$JOB_MANAGER" flink run --python /opt/flink/usrlib/pyflink-jobs/crypto_patterns.py
 
 echo ""
 echo "============================================================"
