@@ -86,6 +86,7 @@ services:
         echo 'Creating crypto Kafka topics...'
         echo '=========================================='
         kafka-topics --create --if-not-exists --topic crypto-trades     --bootstrap-server kafka:9092 --partitions 6 --replication-factor 1 --config retention.ms=604800000
+        kafka-topics --create --if-not-exists --topic crypto-depth      --bootstrap-server kafka:9092 --partitions 6 --replication-factor 1 --config retention.ms=604800000
         kafka-topics --create --if-not-exists --topic crypto-indicators --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --config retention.ms=604800000
         kafka-topics --create --if-not-exists --topic crypto-alerts     --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1 --config retention.ms=604800000
         echo ''

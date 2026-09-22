@@ -5,6 +5,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY crypto_producer.py .
+COPY async_producer.py .
 
-CMD ["python", "-u", "crypto_producer.py"]
+CMD ["python", "-u", "async_producer.py"]
