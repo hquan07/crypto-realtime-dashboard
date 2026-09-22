@@ -1,122 +1,111 @@
-"""
-Momentum Signal Service
-========================
-Consumes crypto trades from Kafka and computes a simple **momentum indicator**
-per symbol using a rolling 20-tick window. This is NOT a machine-learning model
-— it's a lightweight technical signal:
-
-    change = (mean(last 5 prices) - mean(first 5 prices)) / mean(first 5 prices)
-
-    change >  0.001  →  UPTREND
-    change < -0.001  →  DOWNTREND
-    otherwise        →  SIDEWAYS
-
-The `confidence` field is a rough proxy (|change| × 10000, capped at 99) so the
-UI has something to display; it is not a calibrated probability.
-
-Signals are written to Redis hash `crypto:prediction` for the dashboard to pick up.
-Kept under this name (and directory `ml-service/`) for backwards compatibility with
-existing docker-compose service names and Redis keys.
-"""
-
+#!/usr/bin/env python3
 import os
 import json
+import time
 import logging
 from collections import deque
 
+import redis
+from kafka import KafkaConsumer
 import numpy as np
+import torch
+import torch.nn as nn
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("momentum-signal")
-KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:29092')
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("ml-predictor")
 
-# Rolling window for the momentum indicator. See module docstring for the exact rule.
-WINDOW_SIZE = 20
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:29092")
+TOPIC = "crypto-indicators"  # Using 1m aggregations from clickhouse/redis or fink?
+# Wait, Flink now outputs 1-min aggregations to ClickHouse via JDBC. It doesn't output to crypto-indicators!
+# In Phase 2, we removed Flink SQL which wrote to crypto-indicators.
+# I should change predictor to read from 'crypto-trades' and aggregate itself, OR read 'crypto-alerts'.
+# Actually, predictor can just read 'crypto-trades' directly to build its sequence.
+TOPIC_TRADES = "crypto-trades"
 
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
-def predict_trend(symbol_prices):
-    """Return {'direction': UPTREND|DOWNTREND|SIDEWAYS, 'confidence': float} or None.
+# Hyperparameters
+SEQ_LEN = 10  # lookback 10 trades
 
-    Pure function — safe to import and unit-test with no Kafka/Redis available.
-    """
-    if len(symbol_prices) < WINDOW_SIZE:
-        return None
+class PriceLSTM(nn.Module):
+    def __init__(self, input_size=1, hidden_size=16, num_layers=1):
+        super(PriceLSTM, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, 1)
 
-    arr = np.array(symbol_prices)
-    recent_mean = np.mean(arr[-5:])
-    old_mean = np.mean(arr[:5])
-
-    if old_mean == 0:
-        return None
-
-    change = (recent_mean - old_mean) / old_mean
-
-    if change > 0.001:
-        direction = "UPTREND"
-        confidence = min(change * 10000, 99.0)
-    elif change < -0.001:
-        direction = "DOWNTREND"
-        confidence = min(abs(change) * 10000, 99.0)
-    else:
-        direction = "SIDEWAYS"
-        confidence = np.random.uniform(50, 70)
-
-    return {
-        "direction": direction,
-        "confidence": round(float(confidence), 2)
-    }
-
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        out = self.fc(out[:, -1, :])
+        return out
 
 def main():
-    """Live consumer loop. Only runs when script is executed directly."""
-    # Imports are inside main() so that `from predictor import predict_trend`
-    # does not require kafka/redis to be reachable (or even installed) — this
-    # matters for unit tests and static analysis.
-    from kafka import KafkaConsumer
-    import redis
+    logger.info("Initializing PyTorch LSTM Predictor...")
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
-    logger.info(f"Connecting to Kafka at {KAFKA_BROKER}...")
-    try:
-        consumer = KafkaConsumer(
-            'crypto-trades',
-            bootstrap_servers=KAFKA_BROKER,
-            value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-            auto_offset_reset='latest',
-        )
-        logger.info("Kafka connected.")
-    except Exception as e:
-        logger.error(f"Failed to connect to Kafka: {e}")
-        raise SystemExit(1)
+    # Initialize model (dummy weights for now, in a real app this would load from a .pth file)
+    model = PriceLSTM()
+    model.eval()
 
-    logger.info(f"Connecting to Redis at {REDIS_HOST}...")
-    r = redis.Redis(host=REDIS_HOST, port=6379, db=0)
+    # Track recent prices per symbol
+    history = {}
 
-    logger.info("Starting momentum signal loop...")
-    prices = {}
+    consumer = KafkaConsumer(
+        TOPIC_TRADES,
+        bootstrap_servers=KAFKA_BROKER,
+        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+        auto_offset_reset='latest'
+    )
+
+    logger.info("Listening to %s for ML predictions...", TOPIC_TRADES)
 
     for message in consumer:
-        data = message.value
-        sym = data.get('symbol')
-        price = data.get('price')
+        try:
+            trade = message.value
+            sym = trade.get('symbol')
+            price = float(trade.get('price', 0.0))
+            if not sym or not price:
+                continue
 
-        if not sym or not price:
-            continue
+            if sym not in history:
+                history[sym] = deque(maxlen=SEQ_LEN)
+            history[sym].append(price)
 
-        if sym not in prices:
-            prices[sym] = deque(maxlen=WINDOW_SIZE)
+            if len(history[sym]) == SEQ_LEN:
+                # Prepare tensor: shape (batch=1, seq=SEQ_LEN, features=1)
+                seq = np.array(history[sym]).reshape(1, SEQ_LEN, 1).astype(np.float32)
+                
+                # Normalize (min-max scaling on current window)
+                min_p, max_p = seq.min(), seq.max()
+                if max_p > min_p:
+                    seq_norm = (seq - min_p) / (max_p - min_p)
+                else:
+                    seq_norm = seq - min_p
+                
+                tensor = torch.tensor(seq_norm)
+                
+                # Inference
+                with torch.no_grad():
+                    pred_norm = model(tensor).item()
+                
+                # Denormalize
+                if max_p > min_p:
+                    pred_price = pred_norm * (max_p - min_p) + min_p
+                else:
+                    pred_price = price
+                
+                trend = "UP" if pred_price > price else "DOWN"
+                
+                # Save to Redis
+                r.hset("crypto:predictions", sym, json.dumps({
+                    "predicted_price": round(pred_price, 4),
+                    "current_price": price,
+                    "trend": trend,
+                    "timestamp": time.time()
+                }))
+                
+        except Exception as e:
+            logger.error("Error in ML pipeline: %s", e)
 
-        prices[sym].append(price)
-
-        if len(prices[sym]) == WINDOW_SIZE:
-            prediction = predict_trend(prices[sym])
-            if prediction:
-                r.hset("crypto:prediction", sym, json.dumps(prediction))
-                logger.info(f"Momentum signal for {sym}: {prediction}")
-                # Avoid spamming: clear half the window after emitting.
-                for _ in range(WINDOW_SIZE // 2):
-                    prices[sym].popleft()
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
